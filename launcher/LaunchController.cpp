@@ -52,6 +52,7 @@
 #include <QInputDialog>
 #include <QList>
 #include <QPushButton>
+#include <print>
 #include <utility>
 
 #include "BuildConfig.h"
@@ -79,6 +80,10 @@ void LaunchController::executeTask()
 
 void LaunchController::decideAccount()
 {
+    if (m_wantedLaunchMode == LaunchMode::Offline) {
+        return;
+    }
+
     if (m_accountToUse) {
         return;
     }
@@ -111,7 +116,7 @@ void LaunchController::decideAccount()
         }
     }
 
-    if (!m_accountToUse && accounts->anyAccountIsValid()) {
+    if (!m_accountToUse) {
         // If no default account is set, ask the user which one to use.
         ProfileSelectDialog selectDialog(tr("Which account would you like to use?"), ProfileSelectDialog::GlobalDefaultCheckbox,
                                          m_parentWidget);
@@ -130,6 +135,11 @@ void LaunchController::decideAccount()
 
 LaunchDecision LaunchController::decideLaunchMode()
 {
+    if (m_wantedLaunchMode == LaunchMode::Offline) {
+        m_actualLaunchMode = LaunchMode::Offline;
+        return LaunchDecision::Continue;
+    }
+
     if (!m_accountToUse || m_wantedLaunchMode == LaunchMode::Demo) {
         m_actualLaunchMode = LaunchMode::Demo;
         return LaunchDecision::Continue;
@@ -138,25 +148,33 @@ LaunchDecision LaunchController::decideLaunchMode()
     const auto* accounts = APPLICATION->accounts();
     MinecraftAccountPtr accountToCheck = nullptr;
 
+    // Safety check for m_accountToUse
     if (m_accountToUse->accountType() != AccountType::Offline) {
         accountToCheck = m_accountToUse->ownsMinecraft() ? m_accountToUse : nullptr;
-    } else if (const auto defaultAccount = accounts->defaultAccount(); defaultAccount && defaultAccount->ownsMinecraft()) {
-        accountToCheck = defaultAccount;
-    } else {
-        for (int i = 0; i < accounts->count(); i++) {
-            if (const auto account = accounts->at(i); account->ownsMinecraft()) {
-                accountToCheck = account;
-                break;
+    }
+
+    // Fallback to default or first account that owns Minecraft if current selection doesn't
+    if (!accountToCheck) {
+        if (const auto defaultAccount = accounts->defaultAccount(); defaultAccount && defaultAccount->ownsMinecraft()) {
+            accountToCheck = defaultAccount;
+        } else {
+            for (int i = 0; i < accounts->count(); i++) {
+                if (const auto account = accounts->at(i); account->ownsMinecraft()) {
+                    accountToCheck = account;
+                    break;
+                }
             }
         }
     }
 
+    // If still no valid account, fallback to Demo
     if (!accountToCheck) {
         m_actualLaunchMode = LaunchMode::Demo;
         return LaunchDecision::Continue;
     }
 
     auto state = accountToCheck->accountState();
+
     const bool needsRefresh =
         m_wantedLaunchMode == LaunchMode::Normal && (state == AccountState::Offline || accountToCheck->shouldRefresh());
     if (state == AccountState::Unchecked || state == AccountState::Errored || needsRefresh) {
@@ -305,11 +323,38 @@ void LaunchController::login()
         return;
     }
 
+    // Handle Offline mode
+    if (m_actualLaunchMode == LaunchMode::Offline) {
+        bool ok = false;
+        QString name = m_offlineName;
+        if (name.isEmpty()) {
+            name = askOfflineName("Player", &ok);
+            if (!ok) {
+                emitAborted();
+                return;
+            }
+        } else {
+            ok = true;
+        }
+
+        if (ok) {
+            m_session = std::make_shared<AuthSession>();
+            m_session->MakeOffline(name);
+            m_session->launchMode = LaunchMode::Offline;
+            m_session->uuid = MinecraftAccount::uuidFromUsername(name).toString(QUuid::Id128);
+            launchInstance();
+            return;
+        }
+    }
+
+    // Normal launch or offline with existing account
     m_session = std::make_shared<AuthSession>();
     m_session->launchMode = m_actualLaunchMode;
-    m_accountToUse->fillSession(m_session);
+    if (m_accountToUse) {
+        m_accountToUse->fillSession(m_session);
+    }
 
-    if (m_accountToUse->accountType() != AccountType::Offline) {
+    if (m_accountToUse && m_accountToUse->accountType() != AccountType::Offline) {
         if (m_actualLaunchMode == LaunchMode::Normal && !m_accountToUse->hasProfile()) {
             // Now handle setting up a profile name here...
             if (ProfileSetupDialog dialog(m_accountToUse, m_parentWidget); dialog.exec() != QDialog::Accepted) {
@@ -318,7 +363,7 @@ void LaunchController::login()
             }
         }
 
-        if (m_actualLaunchMode == LaunchMode::Offline && m_accountToUse->accountType() != AccountType::Offline) {
+        if (m_actualLaunchMode == LaunchMode::Offline) {
             bool ok = false;
             QString name = m_offlineName;
             if (name.isEmpty()) {

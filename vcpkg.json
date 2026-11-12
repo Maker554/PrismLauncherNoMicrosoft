@@ -1,26 +1,13 @@
 {
-  "dependencies": [
-    "cmark",
-    {
-      "name": "ecm",
-      "host": true
-    },
-    {
-      "name": "libarchive",
-      "default-features": false,
-      "features": [
-        "bzip2",
-        "lz4",
-        "lzma",
-        "lzo",
-        "zstd"
-      ]
-    },
-    {
-      "name": "libqrencode",
-      "default-features": false
-    },
-    "tomlplusplus",
-    "zlib"
-  ]
+  "dependencies" : [ "cmark", {
+    "name" : "libarchive",
+    "default-features" : false,
+    "features" : [ "bzip2", "lz4", "lzma", "lzo", "zstd" ]
+  }, {
+    "name" : "libqrencode",
+    "default-features" : false
+  }, "tomlplusplus", "zlib", {
+    "name" : "ecm",
+    "version>=" : "6.31.0"
+  } ]
 }
